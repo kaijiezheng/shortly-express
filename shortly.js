@@ -30,6 +30,20 @@ app.use(session({
   saveUninitialized: true
 }));
 
+app.use(function(req, res, next) {
+  if (req.session && req.session.username) {
+    new User({username: req.session.username}).fetch().then(function(user) {
+      if (user) {
+        req.username = user.attributes.username;
+        req.session.username = user.attributes.username;
+      }
+      next();
+    });
+  } else {
+    next();
+  }
+});
+
 app.use(express.static(__dirname + '/public'));
 
 app.get('/', util.checkUser, function(req, res) {
@@ -46,6 +60,11 @@ app.get('/login', function(req, res) {
 
 app.get('/signup', function(req, res) {
   res.render('signup');
+});
+
+app.get('/logout', function(req, res) {
+  req.session.destroy();
+  res.redirect('/login');
 });
 
 app.get('/links', function(req, res) {
@@ -99,9 +118,10 @@ app.post('/signup', function(req, res) {
       Users.create({
         username: data.username,
         password: data.password,
-        sid: req.sessionID
       })
       .then(function(newUser) {
+        req.username = newUser.attributes.username;
+        req.session.username = newUser.attributes.username;
         res.redirect('/');
       });
     }
@@ -113,13 +133,15 @@ app.post('/login', function(req, res) {
 
   new User({ username: data.username }).fetch().then(function(found) {
     if (found && bcrypt.compareSync(data.password, found.attributes.password)) {
-      found.set('sid', req.sessionID);
+      req.username = found.attributes.username;
+      req.session.username = found.attributes.username;
       res.redirect('/');
     } else {
       res.redirect('/login');
     }
   });
 });
+
 /************************************************************/
 // Handle the wildcard route last - if all other routes fail
 // assume the route is a short code and try and handle it here.
