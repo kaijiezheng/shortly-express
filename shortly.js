@@ -50,7 +50,7 @@ app.get('/', util.checkUser, function(req, res) {
   res.render('index');
 });
 
-app.get('/create', function(req, res) {
+app.get('/create', util.checkUser, function(req, res) {
   res.render('index');
 });
 
@@ -67,13 +67,20 @@ app.get('/logout', function(req, res) {
   res.redirect('/login');
 });
 
-app.get('/links', function(req, res) {
-  Links.reset().fetch().then(function(links) {
-    res.send(200, links.models);
+app.get('/links', util.checkUser, function(req, res) {
+  new User({ username: req.username }).fetch().then(function(found) {
+    if (found) {
+      Links.query(function(qb) {
+        qb.where('user_id', '=', found.attributes.id);
+      }).fetch()
+      .then(function(links) {
+        res.send(200, links.models);
+      });
+    }
   });
 });
 
-app.post('/links', function(req, res) {
+app.post('/links', util.checkUser, function(req, res) {
   var uri = req.body.url;
 
   if (!util.isValidUrl(uri)) {
@@ -91,14 +98,20 @@ app.post('/links', function(req, res) {
           return res.send(404);
         }
 
-        Links.create({
-          url: uri,
-          title: title,
-          base_url: req.headers.origin
-        })
-        .then(function(newLink) {
-          res.send(200, newLink);
+        new User({ username: req.username }).fetch().then(function(found) {
+          if (found) {
+            Links.create({
+              url: uri,
+              title: title,
+              base_url: req.headers.origin,
+              user_id: found.attributes.id
+            })
+            .then(function(newLink) {
+              res.send(200, newLink);
+            });
+          }
         });
+
       });
     }
   });
