@@ -2,7 +2,9 @@ var express = require('express');
 var util = require('./lib/utility');
 var partials = require('express-partials');
 var bodyParser = require('body-parser');
-
+var bcrypt = require('bcrypt-nodejs');
+var session = require('express-session');
+// var BookshelfStore = require('connect-bookshelf')(session);
 
 var db = require('./app/config');
 var Users = require('./app/collections/users');
@@ -20,28 +22,39 @@ app.use(partials());
 app.use(bodyParser.json());
 // Parse forms (signup/login)
 app.use(bodyParser.urlencoded({ extended: true }));
+
+app.use(session({
+  // store: new BookshelfStore({model: User}),
+  secret: 'oursecretawesomesecret',
+  resave: false,
+  saveUninitialized: true
+}));
+
 app.use(express.static(__dirname + '/public'));
 
-
-app.get('/', 
-function(req, res) {
+app.get('/', util.checkUser, function(req, res) {
   res.render('index');
 });
 
-app.get('/create', 
-function(req, res) {
+app.get('/create', function(req, res) {
   res.render('index');
 });
 
-app.get('/links', 
-function(req, res) {
+app.get('/login', function(req, res) {
+  res.render('login');
+});
+
+app.get('/signup', function(req, res) {
+  res.render('signup');
+});
+
+app.get('/links', function(req, res) {
   Links.reset().fetch().then(function(links) {
     res.send(200, links.models);
   });
 });
 
-app.post('/links', 
-function(req, res) {
+app.post('/links', function(req, res) {
   var uri = req.body.url;
 
   if (!util.isValidUrl(uri)) {
@@ -75,9 +88,38 @@ function(req, res) {
 /************************************************************/
 // Write your authentication routes here
 /************************************************************/
+app.post('/signup', function(req, res) {
+  var data = req.body;
 
+  new User({ username: data.username, password: data.password }).fetch().then(function(found) {
 
+    if (found) {
+      res.send(200, found.attributes);
+    } else {
+      Users.create({
+        username: data.username,
+        password: data.password,
+        sid: req.sessionID
+      })
+      .then(function(newUser) {
+        res.redirect('/');
+      });
+    }
+  });
+});
 
+app.post('/login', function(req, res) {
+  var data = req.body;
+
+  new User({ username: data.username }).fetch().then(function(found) {
+    if (found && bcrypt.compareSync(data.password, found.attributes.password)) {
+      found.set('sid', req.sessionID);
+      res.redirect('/');
+    } else {
+      res.redirect('/login');
+    }
+  });
+});
 /************************************************************/
 // Handle the wildcard route last - if all other routes fail
 // assume the route is a short code and try and handle it here.
