@@ -2,7 +2,9 @@ var express = require('express');
 var util = require('./lib/utility');
 var partials = require('express-partials');
 var bodyParser = require('body-parser');
-
+var bcrypt = require('bcrypt-nodejs');
+var session = require('express-session');
+// var BookshelfStore = require('connect-bookshelf')(session);
 
 var db = require('./app/config');
 var Users = require('./app/collections/users');
@@ -20,28 +22,65 @@ app.use(partials());
 app.use(bodyParser.json());
 // Parse forms (signup/login)
 app.use(bodyParser.urlencoded({ extended: true }));
+
+app.use(session({
+  // store: new BookshelfStore({model: User}),
+  secret: 'oursecretawesomesecret',
+  resave: false,
+  saveUninitialized: true
+}));
+
+app.use(function(req, res, next) {
+  if (req.session && req.session.username) {
+    new User({username: req.session.username}).fetch().then(function(user) {
+      if (user) {
+        req.username = user.attributes.username;
+        req.session.username = user.attributes.username;
+      }
+      next();
+    });
+  } else {
+    next();
+  }
+});
+
 app.use(express.static(__dirname + '/public'));
 
-
-app.get('/', 
-function(req, res) {
+app.get('/', util.checkUser, function(req, res) {
   res.render('index');
 });
 
-app.get('/create', 
-function(req, res) {
+app.get('/create', util.checkUser, function(req, res) {
   res.render('index');
 });
 
-app.get('/links', 
-function(req, res) {
-  Links.reset().fetch().then(function(links) {
-    res.send(200, links.models);
+app.get('/login', function(req, res) {
+  res.render('login');
+});
+
+app.get('/signup', function(req, res) {
+  res.render('signup');
+});
+
+app.get('/logout', function(req, res) {
+  req.session.destroy();
+  res.redirect('/login');
+});
+
+app.get('/links', util.checkUser, function(req, res) {
+  new User({ username: req.username }).fetch().then(function(found) {
+    if (found) {
+      Links.query(function(qb) {
+        qb.where('user_id', '=', found.attributes.id);
+      }).fetch()
+      .then(function(links) {
+        res.send(200, links.models);
+      });
+    }
   });
 });
 
-app.post('/links', 
-function(req, res) {
+app.post('/links', util.checkUser, function(req, res) {
   var uri = req.body.url;
 
   if (!util.isValidUrl(uri)) {
@@ -59,14 +98,20 @@ function(req, res) {
           return res.send(404);
         }
 
-        Links.create({
-          url: uri,
-          title: title,
-          base_url: req.headers.origin
-        })
-        .then(function(newLink) {
-          res.send(200, newLink);
+        new User({ username: req.username }).fetch().then(function(found) {
+          if (found) {
+            Links.create({
+              url: uri,
+              title: title,
+              base_url: req.headers.origin,
+              user_id: found.attributes.id
+            })
+            .then(function(newLink) {
+              res.send(200, newLink);
+            });
+          }
         });
+
       });
     }
   });
@@ -78,17 +123,19 @@ function(req, res) {
 app.post('/signup', function(req, res) {
   var data = req.body;
 
-  new User({ username: data.username, password: data.password}).fetch().then(function(found) {
+  new User({ username: data.username, password: data.password }).fetch().then(function(found) {
+
     if (found) {
       res.send(200, found.attributes);
     } else {
       Users.create({
         username: data.username,
-        password: data.password
+        password: data.password,
       })
       .then(function(newUser) {
-        res.location('/');
-        res.send(200, newUser);
+        req.username = newUser.attributes.username;
+        req.session.username = newUser.attributes.username;
+        res.redirect('/');
       });
     }
   });
@@ -97,15 +144,13 @@ app.post('/signup', function(req, res) {
 app.post('/login', function(req, res) {
   var data = req.body;
 
-  new User({ username: data.username, password: data.password}).fetch().then(function(found) {
-    if (found) {
-      console.log('EXISTS');
-      res.location('/');
-      res.send(200, found.attributes);
+  new User({ username: data.username }).fetch().then(function(found) {
+    if (found && bcrypt.compareSync(data.password, found.attributes.password)) {
+      req.username = found.attributes.username;
+      req.session.username = found.attributes.username;
+      res.redirect('/');
     } else {
-      console.log('DNE');
-      res.location('/login');
-      res.end();
+      res.redirect('/login');
     }
   });
 });
